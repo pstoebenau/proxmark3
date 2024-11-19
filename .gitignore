@@ -36,7 +36,6 @@ version_pm3.c
 originalitysig.csv
 
 # new build file for add-ons.
-Makefile.platform
 Makefile.platform.*
 !Makefile.platform.sample
 

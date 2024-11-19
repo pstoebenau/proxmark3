@@ -42,14 +42,14 @@
 #include "flashmem.h"
 #endif
 
-#define MAX_IND 16 // 4 LEDs - 2^4 combinations
+#define MAX_IND 4 // 4 LEDs - 2^4 combinations
 #define LF_CLOCK 64   // for 125kHz
 
 // em4100rwc_low & em4100rwc_high - array for storage IDs. Its length must be equal.
 // Predefined IDs must be stored in em4100rwc_low[].
 // In em4100rwc_high[] must be nulls
-static uint64_t em4100rwc_low[] = {0x565AF781C7, 0x540053E4E2, 0x1234567890, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-static uint32_t em4100rwc_high[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+static uint64_t em4100rwc_low[] = {0, 0, 0, 0};
+static uint32_t em4100rwc_high[] = {0, 0, 0, 0};
 static uint8_t em4100rwc_slots_count;
 static int em4100rwc_buflen;
 
@@ -140,11 +140,12 @@ void RunMod(void) {
     StandAloneMode();
     FpgaDownloadAndGo(FPGA_BITSTREAM_LF);
     Dbprintf("[=] >>  LF EM4100 read/write/clone started  <<");
+    Dbprintf("Read Mode");
 
     int selected = 0;
     //state 0 - select slot
-    //      1 - read tag to selected slot,
-    //      2 - simulate tag from selected slot
+    //      1 - simulate tag from selected slot
+    //      2 - read tag to selected slot,
     //      3 - write to T5555 tag
     uint8_t state = 0;
     em4100rwc_slots_count = ARRAYLEN(em4100rwc_low);
@@ -164,48 +165,58 @@ void RunMod(void) {
                 if (button_pressed == BUTTON_HOLD) {
                     // Long press - switch to simulate mode
                     SpinUp(100);
-                    led_slot(selected);
-                    state = 2;
+                    Dbprintf("Simulate Mode");
+                    state = 1;
+                    led_slot(state);
                 } else if (button_pressed == BUTTON_SINGLE_CLICK) {
                     // Click - switch to next slot
                     selected = (selected + 1) % em4100rwc_slots_count;
+                    Dbprintf("Selected slot %d", selected);
                     led_slot(selected);
                 }
                 break;
             case 1:
-                // Read mode.
+                // Simulate mode
                 if (button_pressed == BUTTON_HOLD) {
                     // Long press - switch to read mode
+                    SpinDown(100);
+                    Dbprintf("Read Mode");
+                    state = 2;
+                    led_slot(state);
+                } else if (button_pressed == BUTTON_SINGLE_CLICK) {
+                    // Click - start simulating. Click again to exit from simulate mode
+                    Dbprintf("Simulating...");
+                    construct_EM410x_emul(rev_quads(em4100rwc_low[selected]));
+                    flash_leds(100, 5);
+                    // Blocking function
+                    SimulateTagLowFrequency(em4100rwc_buflen, 0, true);
+                    flash_leds(100, 5);
+
+                    // Stay in simulate mode
+                    Dbprintf("Done Simulating");
+                    led_slot(state);
+                }
+                break;
+            case 2:
+                // Read mode.
+                if (button_pressed == BUTTON_HOLD) {
+                    // Long press - switch to write mode
                     SpinUp(100);
-                    led_slot(selected);
+                    Dbprintf("Write Mode");
                     state = 3;
+                    led_slot(state);
                 } else if (button_pressed == BUTTON_SINGLE_CLICK) {
                     // Click - exit to select mode
+                    Dbprintf("Searching for card...");
                     lf_em410x_watch(1, &em4100rwc_high[selected], &em4100rwc_low[selected], true);
                     flash_leds(100, 5);
 #ifdef WITH_FLASH
                     SaveIDtoFlash(selected, em4100rwc_low[selected]);
 #endif
-                    state = 0;
-                }
-                break;
-            case 2:
-                // Simulate mode
-                if (button_pressed == BUTTON_HOLD) {
-                    // Long press - switch to read mode
-                    SpinDown(100);
-                    led_slot(selected);
-                    state = 1;
-                } else if (button_pressed == BUTTON_SINGLE_CLICK) {
-                    // Click - start simulating. Click again to exit from simulate mode
-                    led_slot(selected);
-
-                    construct_EM410x_emul(rev_quads(em4100rwc_low[selected]));
+                    // Stay in read mode
+                    Dbprintf("Done Reading");
                     flash_leds(100, 5);
-
-                    SimulateTagLowFrequency(em4100rwc_buflen, 0, true);
-                    led_slot(selected);
-                    state = 0; // Switch to select mode
+                    led_slot(state);
                 }
                 break;
             case 3:
@@ -213,10 +224,13 @@ void RunMod(void) {
                 if (button_pressed == BUTTON_HOLD) {
                     // Long press - switch to select mode
                     SpinDown(100);
-                    led_slot(selected);
+                    Dbprintf("Select Mode");
                     state = 0;
+                    led_slot(state);
                 } else if (button_pressed == BUTTON_SINGLE_CLICK) {
+                    Dbprintf("Writing to card...");
                     // Click - write ID to tag
+                    flash_leds(100, 5);
                     copy_em410x_to_t55xx(0
                                          , LF_CLOCK
                                          , (uint32_t)(em4100rwc_low[selected] >> 32)
@@ -224,8 +238,11 @@ void RunMod(void) {
                                          , false
                                          , true
                                         );
-                    led_slot(selected);
-                    state = 0; // Switch to select mode
+
+                    // Stay in write mode
+                    Dbprintf("Done Writing");
+                    flash_leds(100, 5);
+                    led_slot(state);
                 }
                 break;
         }
